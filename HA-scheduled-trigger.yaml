@@ -1,0 +1,99 @@
+
+blueprint:
+  name: Utrzymywanie przełącznika według harmonogramu
+  description: >
+    Utrzymuje przełącznik włączony w zadanych godzinach.
+    Poza nimi wymusza wyłączenie i sprawdza jego stan.
+  domain: automation
+
+  input:
+    przelacznik:
+      name: Przełącznik
+      selector:
+        entity:
+          filter:
+            - domain: switch
+
+    start:
+      name: Godzina włączenia
+      default: "08:00:00"
+      selector:
+        time: {}
+
+    koniec:
+      name: Godzina wyłączenia
+      default: "20:00:00"
+      selector:
+        time: {}
+
+variables:
+  przelacznik: !input przelacznik
+
+triggers:
+  - trigger: time
+    at: !input start
+
+  - trigger: time
+    at: !input koniec
+
+  - trigger: state
+    entity_id: !input przelacznik
+
+  - trigger: time_pattern
+    minutes: "/1"
+
+  - trigger: homeassistant
+    event: start
+
+actions:
+  - choose:
+      - conditions:
+          - condition: time
+            after: !input start
+            before: !input koniec
+        sequence:
+          - if:
+              - condition: template
+                value_template: >
+                  {{ not is_state(przelacznik, 'on') }}
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: "{{ przelacznik }}"
+
+    default:
+      - if:
+          - condition: template
+            value_template: >
+              {{ not is_state(przelacznik, 'off') }}
+        then:
+          - repeat:
+              sequence:
+                - action: switch.turn_off
+                  target:
+                    entity_id: "{{ przelacznik }}"
+
+                - wait_template: >
+                    {{ is_state(przelacznik, 'off') }}
+                  timeout: "00:00:05"
+                  continue_on_timeout: true
+
+              until:
+                - condition: template
+                  value_template: >
+                    {{ is_state(przelacznik, 'off')
+                       or repeat.index >= 3 }}
+
+          - if:
+              - condition: template
+                value_template: >
+                  {{ not is_state(przelacznik, 'off') }}
+            then:
+              - action: persistent_notification.create
+                data:
+                  title: "Błąd wyłączenia"
+                  message: >
+                    Nie udało się wyłączyć
+                    {{ przelacznik }} po 3 próbach.
+
+mode: restart
