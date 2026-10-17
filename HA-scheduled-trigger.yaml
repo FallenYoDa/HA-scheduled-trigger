@@ -12,6 +12,7 @@ blueprint:
         entity:
           filter:
             - domain: switch
+            - domain: light
 
     start:
       name: Godzina włączenia
