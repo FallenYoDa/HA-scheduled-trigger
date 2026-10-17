@@ -1,0 +1,65 @@
+
+alias: "Kontrola przełącznika według harmonogramu"
+mode: restart
+
+variables:
+  przelacznik: switch.moj_przelacznik
+  start: "08:00:00"
+  koniec: "20:00:00"
+
+triggers:
+  - trigger: time
+    at: "08:00:00"
+  - trigger: time
+    at: "20:00:00"
+  - trigger: time_pattern
+    minutes: "/1"
+  - trigger: homeassistant
+    event: start
+  - trigger: template
+    value_template: >
+      {{ false }}
+    enabled: false
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ today_at(start) <= now() < today_at(koniec) }}
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ not is_state(przelacznik, 'on') }}"
+            then:
+              - action: homeassistant.turn_on
+                target:
+                  entity_id: "{{ przelacznik }}"
+    default:
+      - if:
+          - condition: template
+            value_template: "{{ not is_state(przelacznik, 'off') }}"
+        then:
+          - repeat:
+              sequence:
+                - action: homeassistant.turn_off
+                  target:
+                    entity_id: "{{ przelacznik }}"
+                - wait_template: "{{ is_state(przelacznik, 'off') }}"
+                  timeout: "00:00:05"
+                  continue_on_timeout: true
+              until:
+                - condition: template
+                  value_template: >
+                    {{ is_state(przelacznik, 'off') or repeat.index >= 3 }}
+
+          - if:
+              - condition: template
+                value_template: "{{ not is_state(przelacznik, 'off') }}"
+            then:
+              - action: persistent_notification.create
+                data:
+                  title: "Błąd wyłączenia przełącznika"
+                  message: >
+                    Nie udało się wyłączyć {{ przelacznik }}
+                    po 3 próbach.
