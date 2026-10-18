@@ -1,43 +1,85 @@
 blueprint:
-  name: Utrzymywanie przełącznika według harmonogramu
+  name: Harmonogram urządzenia - 2 przedziały (Tuya / Light / Switch)
   description: >
-    Utrzymuje przełącznik włączony w zadanych godzinach.
-    Poza nimi wymusza wyłączenie i sprawdza jego stan.
+    Utrzymuje urządzenie włączone w jednym lub dwóch
+    przedziałach czasowych. Poza nimi wymusza wyłączenie,
+    sprawdza stan i ponawia wyłączenie maksymalnie 3 razy.
+    Obsługuje light i switch, również Tuya.
   domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
 
   input:
-    przelacznik:
-      name: Przełącznik
+    urzadzenie:
+      name: Sterowane urządzenie
       selector:
         entity:
           filter:
-            - domain: switch
             - domain: light
+            - domain: switch
 
-    start:
-      name: Godzina włączenia
-      default: "08:00:00"
-      selector:
-        time: {}
+    okres1:
+      name: Pierwszy przedział
+      icon: mdi:clock-outline
+      input:
+        start1:
+          name: Godzina włączenia
+          default: "06:00:00"
+          selector:
+            time: {}
 
-    koniec:
-      name: Godzina wyłączenia
-      default: "20:00:00"
-      selector:
-        time: {}
+        koniec1:
+          name: Godzina wyłączenia
+          default: "08:30:00"
+          selector:
+            time: {}
+
+    okres2:
+      name: Drugi przedział (opcjonalny)
+      icon: mdi:clock-plus-outline
+      collapsed: true
+      input:
+        wlacz_okres2:
+          name: Włącz drugi przedział
+          default: false
+          selector:
+            boolean: {}
+
+        start2:
+          name: Godzina włączenia
+          default: "17:30:00"
+          selector:
+            time: {}
+
+        koniec2:
+          name: Godzina wyłączenia
+          default: "20:00:00"
+          selector:
+            time: {}
 
 variables:
-  przelacznik: !input przelacznik
+  urzadzenie: !input urzadzenie
+  start1: !input start1
+  koniec1: !input koniec1
+  wlacz_okres2: !input wlacz_okres2
+  start2: !input start2
+  koniec2: !input koniec2
 
 triggers:
   - trigger: time
-    at: !input start
+    at: !input start1
 
   - trigger: time
-    at: !input koniec
+    at: !input koniec1
+
+  - trigger: time
+    at: !input start2
+
+  - trigger: time
+    at: !input koniec2
 
   - trigger: state
-    entity_id: !input przelacznik
+    entity_id: !input urzadzenie
 
   - trigger: time_pattern
     minutes: "/1"
@@ -46,54 +88,73 @@ triggers:
     event: start
 
 actions:
+  - variables:
+      aktywny: >-
+        {% set teraz = now() %}
+        {% set a = today_at(start1) %}
+        {% set b = today_at(koniec1) %}
+        {% set c = today_at(start2) %}
+        {% set d = today_at(koniec2) %}
+        {% set pierwszy =
+          (a < b and a <= teraz < b)
+          or (a > b and (teraz >= a or teraz < b))
+        %}
+        {% set drugi =
+          wlacz_okres2 and (
+            (c < d and c <= teraz < d)
+            or (c > d and (teraz >= c or teraz < d))
+          )
+        %}
+        {{ pierwszy or drugi }}
+
   - choose:
       - conditions:
-          - condition: time
-            after: !input start
-            before: !input koniec
+          - condition: template
+            value_template: "{{ aktywny }}"
         sequence:
           - if:
               - condition: template
                 value_template: >
-                  {{ not is_state(przelacznik, 'on') }}
+                  {{ not is_state(urzadzenie, 'on') }}
             then:
-              - action: switch.turn_on
+              - action: homeassistant.turn_on
                 target:
-                  entity_id: "{{ przelacznik }}"
+                  entity_id: "{{ urzadzenie }}"
 
     default:
       - if:
           - condition: template
             value_template: >
-              {{ not is_state(przelacznik, 'off') }}
+              {{ not is_state(urzadzenie, 'off') }}
         then:
           - repeat:
               sequence:
-                - action: switch.turn_off
+                - action: homeassistant.turn_off
                   target:
-                    entity_id: "{{ przelacznik }}"
+                    entity_id: "{{ urzadzenie }}"
 
                 - wait_template: >
-                    {{ is_state(przelacznik, 'off') }}
+                    {{ is_state(urzadzenie, 'off') }}
                   timeout: "00:00:05"
                   continue_on_timeout: true
 
               until:
                 - condition: template
                   value_template: >
-                    {{ is_state(przelacznik, 'off')
+                    {{ is_state(urzadzenie, 'off')
                        or repeat.index >= 3 }}
 
           - if:
               - condition: template
                 value_template: >
-                  {{ not is_state(przelacznik, 'off') }}
+                  {{ not is_state(urzadzenie, 'off') }}
             then:
               - action: persistent_notification.create
                 data:
-                  title: "Błąd wyłączenia"
+                  title: "Błąd wyłączenia urządzenia"
                   message: >
-                    Nie udało się wyłączyć
-                    {{ przelacznik }} po 3 próbach.
+                    Urządzenie {{ urzadzenie }}
+                    nie potwierdziło wyłączenia
+                    po 3 próbach.
 
 mode: restart
